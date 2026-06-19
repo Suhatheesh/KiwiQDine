@@ -1,0 +1,101 @@
+import axios, { AxiosResponse, InternalAxiosRequestConfig } from "axios";
+import { tokenStorage } from "../utils/token";
+
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL;
+
+let isRefreshing = false;
+let failedQueue: { resolve: (value: unknown) => void; reject: (reason?: any) => void; }[] = [];
+
+const axiosClient = axios.create({
+    baseURL: apiBaseUrl,
+    timeout: 10000,
+    headers: {
+        "Content-Type": "application/json",
+        Accept: "application/json",
+    }
+});
+
+const processQueue = (error: unknown, token: string | null = null) => {
+    failedQueue.forEach((prom) => {
+        if (error) {
+            prom.reject(error);
+        } else {
+            prom.resolve(token);
+        }
+    });
+    failedQueue = [];
+};
+
+axiosClient.interceptors.request.use(
+    (value: InternalAxiosRequestConfig<any>) => {
+        const token = tokenStorage.getAccessToken();
+        if (token) {
+            value.headers.Authorization = `Bearer ${token}`;
+        }
+        return value;
+    },
+    (error: any) => Promise.reject(error)
+);
+
+axiosClient.interceptors.response.use(
+    (response: AxiosResponse) => response.data,
+    async (error: any) => {
+        const originalRequest = error.config;
+        if (!error.response) {
+            console.error("Network error:", error);
+            return Promise.reject({ message: "Network Error. Please try again." });
+        }
+
+        const { status, data } = error.response;
+
+        if (status === 401 && !(data?.path?.includes("login"))) {
+            if (isRefreshing) {
+                try {
+                    const token = await new Promise(function (resolve, reject) {
+                        failedQueue.push({ resolve, reject });
+                    });
+                    originalRequest.headers.Authorization = `Bearer ${token}`;
+                    return await axiosClient(originalRequest);
+                } catch (err) {
+                    return await Promise.reject(err);
+                }
+            }
+            originalRequest._retry = true;
+            isRefreshing = true;
+
+            const refreshToken = tokenStorage.getRefreshToken();
+            if (!refreshToken) {
+                window.location.href = "/login";
+                return Promise.reject(error);
+            }
+
+            try {
+                const response = await axios.post(`${apiBaseUrl}/api/auth/refresh`, { refreshToken });
+                const { accessToken: access_token, refreshToken: refresh_token } = response.data;
+
+                tokenStorage.setTokens(access_token, refresh_token)
+
+                axiosClient.defaults.headers.Authorization = `Bearer ${access_token}`;
+                processQueue(null, access_token);
+
+                // Retry original request
+                return axiosClient(originalRequest);
+            } catch (refreshError) {
+                processQueue(refreshError, null);
+                tokenStorage.remove();
+                window.location.href = "/login";
+                return Promise.reject(refreshError);
+            } finally {
+                isRefreshing = false;
+            }
+        } else if (status === 403) {
+            console.warn("Forbidden: insufficient permissions");
+        } else if (status >= 500) {
+            console.error("Server error:", error.response);
+        }
+
+        return Promise.reject(error.response?.data || error);
+    }
+)
+
+export default axiosClient;

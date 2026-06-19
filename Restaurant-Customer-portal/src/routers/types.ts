@@ -1,0 +1,15 @@
+export enum RootLinks {
+    WELCOME = '/',
+    MENU = '/menu',
+    REVIEWORDER = '/revieworder',
+    OTPVERIFICATION = '/verification',
+    FINALISEORDER = '/completeorder',
+    ORDERSUMMARY = '/ordersummary',
+    ORDERSTATUS = '/orderstatus',
+    ONGOINGORDERS = '/ongoing-orders',
+    LOADINGSCREEN = '/loading',
+    REVIEW = '/review',
+    RESTAURANTLIST = '/restaurant-list',
+    REVIEWFOODCOURTORDER = '/review-food-court-order',
+    FOODCOURT_ORDER_SUMMARY = '/food-court-order-summary',
+}
